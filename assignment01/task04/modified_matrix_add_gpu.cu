@@ -2,10 +2,12 @@
 #include <fstream>
 #include <cmath>
 #include <cuda_runtime.h>
+#include <chrono>  // <-- include chrono for CPU timing
 
 using namespace std;
+using namespace std::chrono; // <-- fix for chrono in .cu file
 
-// Allocate GPU memory
+// Allocating GPU memory
 float* allocGPU(int r, int c) {
     float* m;
     cudaError_t err = cudaMalloc((void**)&m, r * c * sizeof(float));
@@ -16,7 +18,7 @@ float* allocGPU(int r, int c) {
     return m;
 }
 
-// Copy matrix to/from GPU
+// Copying matrix to/from GPU
 void copyMatrix(float* dst, float* src, int r, int c, cudaMemcpyKind dir) {
     cudaError_t err = cudaMemcpy(dst, src, r * c * sizeof(float), dir);
     if (err != cudaSuccess) {
@@ -27,19 +29,19 @@ void copyMatrix(float* dst, float* src, int r, int c, cudaMemcpyKind dir) {
 
 // GPU kernel for element-wise addition
 __global__ void addKernel(float* A, float* B, float* C, int r, int c) {
-    int i = blockIdx.y * blockDim.y + threadIdx.y;
-    int j = blockIdx.x * blockDim.x + threadIdx.x;
+    int i = blockIdx.y * blockDim.y + threadIdx.y; // row
+    int j = blockIdx.x * blockDim.x + threadIdx.x; // column
     if (i < r && j < c) {
         int idx = i * c + j;
         C[idx] = A[idx] + B[idx];
     }
 }
 
-// Allocate host memory
+// Allocate host memory (CPU helper)
 float* allocHost(int r, int c) {
     float* m = new float[r * c];
     if (!m) {
-        cerr << "Host allocation failed\n";
+        cerr << "Host allocation failed" << endl;
         exit(EXIT_FAILURE);
     }
     return m;
@@ -66,7 +68,7 @@ float matrixAddGPU(float* A, float* B, float* C, int r, int c) {
     copyMatrix(B_d, B, r, c, cudaMemcpyHostToDevice);
 
     dim3 blockDim(16, 16);
-    dim3 gridDim((c + 15) / 16, (r + 15) / 16);
+    dim3 gridDim(ceil(c / 16.0), ceil(r / 16.0));
     addKernel<<<gridDim, blockDim>>>(A_d, B_d, C_d, r, c);
     cudaDeviceSynchronize();
 
@@ -76,19 +78,19 @@ float matrixAddGPU(float* A, float* B, float* C, int r, int c) {
     cudaEventSynchronize(stop);
 
     float ms = 0;
-    cudaEventElapsedTime(&ms, start, stop); // ms includes transfers + kernel
+    cudaEventElapsedTime(&ms, start, stop); // includes transfers + kernel
 
     cudaFree(A_d); cudaFree(B_d); cudaFree(C_d);
     cudaEventDestroy(start); cudaEventDestroy(stop);
 
-    return ms * 1000; // μs
+    return ms * 1000; // convert ms to μs for consistency with CPU CSV
 }
 
 int main() {
     int sizes[] = {2000, 4000, 6000, 8000, 10000};
 
-    ofstream csv("task4_times.csv", ios::app); // append GPU times
-    // CSV header already created by CPU file
+    ofstream csv("task4_times.csv");
+    csv << "size,cpu_time_us,gpu_time_us\n"; // header
 
     for (int sz : sizes) {
         int r = sz, c = sz;
@@ -99,11 +101,17 @@ int main() {
         fillMatrix(A, r, c, true);
         fillMatrix(B, r, c, false);
 
+        // Measure GPU time
         float gpu_time = matrixAddGPU(A, B, C, r, c);
 
-        // Append GPU time to the corresponding row
-        // We'll read CSV, update GPU column
-        cout << "GPU Size " << sz << " done, Time: " << gpu_time << " μs\n";
+        // Measure CPU time
+        auto t1 = high_resolution_clock::now();
+        for (int i = 0; i < r * c; ++i) C[i] = A[i] + B[i];
+        auto t2 = high_resolution_clock::now();
+        auto cpu_time = duration_cast<microseconds>(t2 - t1).count();
+
+        csv << sz << "," << cpu_time << "," << gpu_time << "\n";
+        cout << "Size " << sz << " done, CPU: " << cpu_time << " μs, GPU: " << gpu_time << " μs\n";
 
         delete[] A; delete[] B; delete[] C;
     }
@@ -111,3 +119,4 @@ int main() {
     csv.close();
     return 0;
 }
+
