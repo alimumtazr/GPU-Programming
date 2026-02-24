@@ -1,0 +1,12 @@
+# Computational Intensity (Naive GPU)
+#   FLOPS      = 2 * N * M * K = 2 * 3 * 2 * 4 = 48
+#   Mem traffic = (N*K + K*M + N*M) * 4 bytes
+#   CI          = 0.4615 FLOPS/byte
+#
+# Result Matrix C: 3 x 2
+rows_C=3
+cols_C=2
+
+1.2951 1.6336
+1.2974 1.7321
+0.7333 1.0618
